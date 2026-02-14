@@ -1,0 +1,6 @@
+build/
+.DS_Store
+*~
+ndisdk/
+3rdparty/macos/*SDK*
+3rdparty/windows/*SDK*

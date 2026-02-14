@@ -1,0 +1,88 @@
+// Copyright (c) 2026 Kevin Day
+// SPDX-License-Identifier: BSD-2-Clause
+
+#pragma once
+
+#define PF_DEEP_COLOR_AWARE 1
+
+#include "AEConfig.h"
+
+#include "PrSDKTypes.h"
+#include "AE_Effect.h"
+#include "A.h"
+#include "AE_Macros.h"
+#include "AEFX_SuiteHandlerTemplate.h"
+#include "Param_Utils.h"
+#include "PrSDKAESupport.h"
+
+// Preset indices (1-based, matching PF_ADD_POPUP order).
+enum {
+  RF2_PRESET_CUSTOM = 1,
+  RF2_PRESET_STUDIO_MONITOR,
+  RF2_PRESET_BROADCAST_RF,
+  RF2_PRESET_WEAK_RF,
+  RF2_PRESET_GOOD_VHS,
+  RF2_PRESET_WORN_VHS,
+  RF2_PRESET_DAMAGED_VHS,
+  RF2_NUM_PRESETS = RF2_PRESET_DAMAGED_VHS
+};
+
+// Parameter indices (order must match PF_ADD_* calls in ParamsSetup).
+enum {
+  RF2_INPUT = 0,
+
+  RF2_PRESET,
+
+  // -- Decode --
+  RF2_BRIGHTNESS,
+  RF2_CONTRAST,
+  RF2_SATURATION,
+  RF2_TINT,
+  RF2_SHARPNESS,
+  RF2_COMB_FILTER,
+  RF2_DOT_CRAWL,
+  RF2_CHROMA_DELAY,
+  RF2_OVERSCAN_REVEAL,
+  RF2_H_LOCK,
+  RF2_V_HOLD,
+  RF2_BURST_LOCK,
+
+  // -- Signal effects --
+  RF2_NOISE,
+  RF2_GHOST_GAIN,
+  RF2_GHOST_DELAY,
+  RF2_GHOST_ENSEMBLE,
+  RF2_LINE_JITTER,
+  RF2_AFC_HUNT,
+  RF2_RF_DRIFT,
+  RF2_AM_NONLINEARITY,
+  RF2_IMPULSE_NOISE,
+  RF2_AGC_PUMP,
+  RF2_HUM,
+  RF2_CHROMA_FLUTTER,
+  RF2_YC_CROSSTALK,
+  RF2_H_SYNC_NOISE,
+  RF2_V_SYNC_NOISE,
+  RF2_BURST_NOISE,
+  RF2_VHS_TRACKING,
+  RF2_VHS_WRINKLE,
+  RF2_VHS_HEAD_SWITCH,
+  RF2_VHS_DROPOUTS,
+  RF2_NOISE_COLOR,
+  RF2_GROUP_DELAY,
+
+  // -- Encoder --
+  RF2_LUMA_CUTOFF,
+  RF2_I_CUTOFF,
+  RF2_Q_CUTOFF,
+  RF2_CHROMA_MOD_SCALE,
+  RF2_FILTER_PASSES,
+
+  RF2_NUM_PARAMS
+};
+
+#define RF2_MAJOR_VERSION  1
+#define RF2_MINOR_VERSION  0
+#define RF2_BUG_VERSION    0
+#define RF2_STAGE_VERSION  PF_Stage_DEVELOP
+#define RF2_BUILD_VERSION  0
