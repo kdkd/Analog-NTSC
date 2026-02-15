@@ -238,7 +238,15 @@ void NtscDecoder::Decode(const std::vector<float>& frame_ire,
   int top_start = map.top_field_start;
   int bottom_start = map.bottom_field_start;
   if (enable_h_lock_tracking) {
-    float h_phase = 0.0f;
+    // Separate RNG for horizontal oscillator drift, seeded independently
+    // to avoid perturbing the frame_rng sequence used by V Hold.
+    std::mt19937 h_rng(static_cast<uint32_t>(controls.random_seed ^ 0xA7B3C1D5u));
+    std::normal_distribution<float> h_gauss(0.0f, 1.0f);
+    const float h_lim = 2.0f + 22.0f * h_lock_strength;
+    // Random initial phase models the horizontal oscillator's frequency
+    // offset — it can start ahead of or behind the incoming sync.
+    float h_phase = h_gauss(h_rng) * h_lim * 0.4f;
+    h_phase = Clamp(h_phase, -h_lim, h_lim);
     const float nominal_center = static_cast<float>(t.hsync_samples) * 0.5f;
     for (uint32_t line = 0; line < t.lines_per_frame; ++line) {
       const float* row = frame_ire.data() + static_cast<size_t>(line) * t.samples_per_line;
@@ -246,7 +254,8 @@ void NtscDecoder::Decode(const std::vector<float>& frame_ire,
       const float error = static_cast<float>(center) - nominal_center;
       const float h_k = 0.04f + 0.32f * h_lock_strength;
       h_phase += h_k * (error - h_phase);
-      const float h_lim = 2.0f + 22.0f * h_lock_strength;
+      // Per-line oscillator drift (random walk).
+      h_phase += h_gauss(h_rng) * 0.15f * h_lock_strength;
       h_phase = Clamp(h_phase, -h_lim, h_lim);
       line_h_offset[line] = static_cast<int>(std::lrintf(h_phase));
     }
@@ -302,11 +311,17 @@ void NtscDecoder::Decode(const std::vector<float>& frame_ire,
     const int max_delta = 1 + static_cast<int>(std::lrintf(16.0f * std::pow(v_lock_strength, 1.35f)));
     const int top_delta_raw = top_candidate - map.top_field_start;
     const int bottom_delta_raw = bottom_candidate - map.bottom_field_start;
+    const int raw_delta =
+        static_cast<int>(std::lrintf(0.5f *
+                                     static_cast<float>(top_delta_raw + bottom_delta_raw)));
+    // The sync detection window is asymmetric (more room after the
+    // nominal position than before), which biases displacement in one
+    // direction.  A real vertical oscillator can drift either way when
+    // sync is weak, so randomise the sign to remove the bias.
     const int frame_delta =
         std::max(-max_delta,
                  std::min(max_delta,
-                          static_cast<int>(std::lrintf(0.5f *
-                                                       static_cast<float>(top_delta_raw + bottom_delta_raw)))));
+                          (uni01(frame_rng) < 0.5f) ? raw_delta : -raw_delta));
     top_start = map.top_field_start + frame_delta;
     bottom_start = map.bottom_field_start + frame_delta;
 
@@ -382,10 +397,13 @@ void NtscDecoder::Decode(const std::vector<float>& frame_ire,
              static_cast<float>(sample_lines)) -
         0.5f - static_cast<float>(extra_lines);
     const int row_idx = static_cast<int>(std::lrintf(mapped_row));
-    const int line = (y & 1) ? (bottom_start + row_idx) : (top_start + row_idx);
-    if (line < 0 || static_cast<uint32_t>(line) >= t.lines_per_frame) {
-      continue;
-    }
+    int line = (y & 1) ? (bottom_start + row_idx) : (top_start + row_idx);
+    // Wrap around the frame — a real CRT keeps scanning regardless of
+    // oscillator timing, so the VBI region becomes visible as a dark
+    // rolling bar when V Hold drifts.
+    const int total_lines = static_cast<int>(t.lines_per_frame);
+    line = line % total_lines;
+    if (line < 0) line += total_lines;
 
     const float* cur = frame_ire.data() + static_cast<size_t>(line) * t.samples_per_line;
     const float blank = EstimateBlankLevel(cur, t);
