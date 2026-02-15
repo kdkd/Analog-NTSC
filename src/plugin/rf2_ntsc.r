@@ -5,6 +5,13 @@
 #include "AE_EffectVers.h"
 #include "AE_General.r"
 
+// Use a backward-compatible spec subversion so the plugin loads on older
+// hosts (AE 2023 / 23.x and later).  The SDK 25.6 header defines
+// PF_PLUG_IN_SUBVERS as 29 which is too new for pre-2025 hosts.
+// Subversion 25 corresponds roughly to the AE 2022-era API and our
+// plugin does not use any features introduced after that.
+#define PF_PLUG_IN_SUBVERS_COMPAT 25
+
 resource 'PiPL' (16000) {
 	{
 		Kind {
@@ -28,7 +35,7 @@ resource 'PiPL' (16000) {
 		},
 		AE_Effect_Spec_Version {
 			PF_PLUG_IN_VERSION,
-			PF_PLUG_IN_SUBVERS
+			PF_PLUG_IN_SUBVERS_COMPAT
 		},
 		AE_Effect_Version {
 			524288	/* 1.0.0 */

@@ -31,9 +31,9 @@ ifeq ($(PLATFORM),windows)
 # ===== Windows (MinGW-w64) — plugin only ==================================
 
 CXX      := g++
-CXXFLAGS := -std=c++20 -O3 -march=x86-64-v2 -ffast-math -flto \
+CXXFLAGS := -std=c++20 -O3 -march=x86-64 -msse2 -ffast-math -flto \
             -Wall -Wextra -Wpedantic -Iinclude
-LDFLAGS  := -flto -static-libgcc -static-libstdc++
+LDFLAGS  := -flto -static
 
 AE_SDK_DIR := 3rdparty/windows/AfterEffectsSDK_25.6_61_win/ae25.6_61.64bit.AfterEffectsSDK
 PR_SDK_DIR := 3rdparty/windows/Premiere Pro 26.0 C++ SDK
