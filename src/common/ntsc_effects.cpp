@@ -63,12 +63,32 @@ void ApplyCompositeEffectsInternal(std::vector<float>* frame_ire,
   std::uniform_real_distribution<float> uni01(0.0f, 1.0f);
   std::normal_distribution<float> gauss01(0.0f, 1.0f);
 
+  // Estimate the blanking-interval (back porch) level for a scanline.
+  // Used by DC restoration after multipath and by AGC pump.
+  auto estimate_blank_simple = [&](const float* row) -> float {
+    const uint32_t start = std::min<uint32_t>(samples_per_line, hsync_samples + 6U);
+    const uint32_t end = std::min<uint32_t>(samples_per_line, burst_start);
+    if (start >= end) {
+      return 0.0f;
+    }
+    float sum = 0.0f;
+    uint32_t n = 0;
+    for (uint32_t s = start; s < end; ++s) {
+      sum += row[s];
+      ++n;
+    }
+    return n > 0 ? (sum / static_cast<float>(n)) : 0.0f;
+  };
+
   if (multipath_gain != 0.0f && multipath_delay_samples > 0) {
     std::vector<float> base = *frame_ire;
     const size_t delay = multipath_delay_samples;
+    // AGC normalization: the receiver reduces IF gain to compensate for
+    // the increased total signal power from the direct + reflected paths.
+    const float norm = 1.0f / (1.0f + std::fabs(multipath_gain));
     for (size_t i = 0; i < frame_ire->size(); ++i) {
       const float ghost = (i >= delay) ? base[i - delay] * multipath_gain : 0.0f;
-      (*frame_ire)[i] = Clamp(base[i] + ghost, -60.0f, 140.0f);
+      (*frame_ire)[i] = Clamp((base[i] + ghost) * norm, -60.0f, 140.0f);
     }
   }
 
@@ -93,6 +113,7 @@ void ApplyCompositeEffectsInternal(std::vector<float>* frame_ire,
     const float g1 = gbase * (0.9f + 0.4f * std::sin(phase * 0.71f));
     const float g2 = -0.75f * gbase * (0.9f + 0.4f * std::sin(phase * 0.49f + 1.3f));
     const float g3 = 0.52f * gbase * (0.9f + 0.4f * std::sin(phase * 0.31f + 2.1f));
+    const float ens_norm = 1.0f / (1.0f + std::fabs(g1) + std::fabs(g2) + std::fabs(g3));
     for (size_t i = 0; i < frame_ire->size(); ++i) {
       float v = base[i];
       if (i >= d1) {
@@ -104,7 +125,23 @@ void ApplyCompositeEffectsInternal(std::vector<float>* frame_ire,
       if (i >= d3) {
         v += g3 * base[i - d3];
       }
-      (*frame_ire)[i] = Clamp(v, -80.0f, 140.0f);
+      (*frame_ire)[i] = Clamp(v * ens_norm, -80.0f, 140.0f);
+    }
+  }
+
+  // DC restoration: a real receiver's black-level clamp measures the back
+  // porch each line and restores it to reference black (0 IRE).  Without
+  // this, multipath ghosts raise the overall brightness unrealistically.
+  if ((multipath_gain != 0.0f || multipath_ensemble_strength > 0.0f) &&
+      lines_per_frame > 0 && samples_per_line > 0) {
+    for (uint32_t line = 0; line < lines_per_frame; ++line) {
+      float* row = frame_ire->data() + static_cast<size_t>(line) * samples_per_line;
+      const float blank = estimate_blank_simple(row);
+      if (std::fabs(blank) > 0.001f) {
+        for (uint32_t s = 0; s < samples_per_line; ++s) {
+          row[s] -= blank;
+        }
+      }
     }
   }
 
@@ -140,21 +177,6 @@ void ApplyCompositeEffectsInternal(std::vector<float>* frame_ire,
       }
     }
   }
-
-  auto estimate_blank_simple = [&](const float* row) -> float {
-    const uint32_t start = std::min<uint32_t>(samples_per_line, hsync_samples + 6U);
-    const uint32_t end = std::min<uint32_t>(samples_per_line, burst_start);
-    if (start >= end) {
-      return 0.0f;
-    }
-    float sum = 0.0f;
-    uint32_t n = 0;
-    for (uint32_t s = start; s < end; ++s) {
-      sum += row[s];
-      ++n;
-    }
-    return n > 0 ? (sum / static_cast<float>(n)) : 0.0f;
-  };
 
   if (rf_drift_strength > 0.0f && lines_per_frame > 0 && samples_per_line > 0) {
     std::vector<float> drift_scratch(samples_per_line);

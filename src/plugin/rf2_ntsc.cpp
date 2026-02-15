@@ -123,7 +123,7 @@ void ApplyPreset(PF_ParamDef* params[], int preset) {
   // -- Decode --
   SetF(params, RF2_BRIGHTNESS, 0.0f);
   SetF(params, RF2_CONTRAST,   1.0f);
-  SetF(params, RF2_SATURATION, 0.9f);
+  SetF(params, RF2_SATURATION, 1.0f);
   SetF(params, RF2_TINT,       0.0f);
   SetF(params, RF2_SHARPNESS,  0.0f);
   SetB(params, RF2_COMB_FILTER, true);
@@ -160,145 +160,162 @@ void ApplyPreset(PF_ParamDef* params[], int preset) {
   SetF(params, RF2_LUMA_CUTOFF,     4.2f);
   SetF(params, RF2_I_CUTOFF,        1.1f);
   SetF(params, RF2_Q_CUTOFF,        0.45f);
-  SetF(params, RF2_CHROMA_MOD_SCALE,0.88f);
+  SetF(params, RF2_CHROMA_MOD_SCALE,1.0f);
   SetF(params, RF2_FILTER_PASSES,   3.0f);
 
   switch (preset) {
-    case RF2_PRESET_STUDIO_MONITOR:
-      // Pristine composite — only NTSC's inherent resolution/color limits.
-      // All effects stay at zero.
+    case RF2_PRESET_CLEAN:
+      // Pure NTSC encode/decode, no effects.
+      // Shows only NTSC's inherent bandwidth and color resolution limits.
       break;
 
-    case RF2_PRESET_BROADCAST_RF:
-      // Good over-the-air reception with a decent antenna.
-      SetF(params, RF2_NOISE,           1.5f);
-      SetF(params, RF2_NOISE_COLOR,     0.3f);
-      SetF(params, RF2_GHOST_GAIN,      0.08f);
+    case RF2_PRESET_GOOD_RF:
+      // Close station, rooftop antenna. Barely-visible degradation.
+      SetF(params, RF2_CHROMA_MOD_SCALE,0.88f);
+      SetF(params, RF2_NOISE,           1.0f);
+      SetF(params, RF2_NOISE_COLOR,     0.25f);
+      SetF(params, RF2_GHOST_GAIN,      0.05f);
       SetF(params, RF2_GHOST_DELAY,    24.0f);
-      SetF(params, RF2_GHOST_ENSEMBLE,  0.1f);
-      SetF(params, RF2_LINE_JITTER,     0.1f);
-      SetF(params, RF2_AFC_HUNT,        0.05f);
-      SetF(params, RF2_RF_DRIFT,        0.02f);
-      SetF(params, RF2_AM_NONLINEARITY, 0.05f);
-      SetF(params, RF2_AGC_PUMP,        0.02f);
-      SetF(params, RF2_HUM,             0.03f);
-      SetF(params, RF2_CHROMA_FLUTTER,  0.02f);
-      SetF(params, RF2_YC_CROSSTALK,    0.05f);
-      SetF(params, RF2_H_SYNC_NOISE,    0.5f);
-      SetF(params, RF2_V_SYNC_NOISE,    0.3f);
-      SetF(params, RF2_BURST_NOISE,     0.5f);
-      SetF(params, RF2_GROUP_DELAY,     0.1f);
+      SetF(params, RF2_AM_NONLINEARITY, 0.02f);
+      SetF(params, RF2_YC_CROSSTALK,    0.03f);
+      SetF(params, RF2_H_SYNC_NOISE,    0.2f);
+      SetF(params, RF2_V_SYNC_NOISE,    0.2f);
+      SetF(params, RF2_BURST_NOISE,     0.3f);
+      SetF(params, RF2_GROUP_DELAY,     0.05f);
       break;
 
-    case RF2_PRESET_WEAK_RF:
-      // Poor reception — rabbit-ears, distant transmitter.
+    case RF2_PRESET_AVERAGE_RF:
+      // Indoor antenna, suburban area. Visible noise, some ghosting.
+      SetF(params, RF2_CHROMA_MOD_SCALE,0.88f);
+      SetF(params, RF2_NOISE,           2.5f);
+      SetF(params, RF2_NOISE_COLOR,     0.35f);
+      SetF(params, RF2_GHOST_GAIN,      0.12f);
+      SetF(params, RF2_GHOST_DELAY,    28.0f);
+      SetF(params, RF2_GHOST_ENSEMBLE,  0.15f);
+      SetF(params, RF2_LINE_JITTER,     0.15f);
+      SetF(params, RF2_AFC_HUNT,        0.08f);
+      SetF(params, RF2_RF_DRIFT,        0.05f);
+      SetF(params, RF2_AM_NONLINEARITY, 0.06f);
+      SetF(params, RF2_AGC_PUMP,        0.03f);
+      SetF(params, RF2_HUM,             0.04f);
+      SetF(params, RF2_CHROMA_FLUTTER,  0.04f);
+      SetF(params, RF2_YC_CROSSTALK,    0.08f);
+      SetF(params, RF2_H_SYNC_NOISE,    1.0f);
+      SetF(params, RF2_V_SYNC_NOISE,    0.6f);
+      SetF(params, RF2_BURST_NOISE,     1.0f);
+      SetF(params, RF2_GROUP_DELAY,     0.15f);
+      break;
+
+    case RF2_PRESET_BAD_RF:
+      // Rabbit ears, fringe area. Heavy snow, still watchable.
+      SetF(params, RF2_CHROMA_MOD_SCALE,0.88f);
       SetF(params, RF2_NOISE,           5.0f);
-      SetF(params, RF2_NOISE_COLOR,     0.5f);
-      SetF(params, RF2_GHOST_GAIN,      0.3f);
+      SetF(params, RF2_NOISE_COLOR,     0.50f);
+      SetF(params, RF2_GHOST_GAIN,      0.25f);
       SetF(params, RF2_GHOST_DELAY,    32.0f);
-      SetF(params, RF2_GHOST_ENSEMBLE,  0.35f);
-      SetF(params, RF2_LINE_JITTER,     0.6f);
-      SetF(params, RF2_AFC_HUNT,        0.2f);
-      SetF(params, RF2_RF_DRIFT,        0.2f);
-      SetF(params, RF2_AM_NONLINEARITY, 0.15f);
-      SetF(params, RF2_IMPULSE_NOISE,   0.15f);
-      SetF(params, RF2_AGC_PUMP,        0.1f);
-      SetF(params, RF2_HUM,             0.1f);
-      SetF(params, RF2_CHROMA_FLUTTER,  0.1f);
-      SetF(params, RF2_YC_CROSSTALK,    0.15f);
-      SetF(params, RF2_H_SYNC_NOISE,    4.0f);
-      SetF(params, RF2_V_SYNC_NOISE,    3.0f);
-      SetF(params, RF2_BURST_NOISE,     4.0f);
-      SetF(params, RF2_H_LOCK,          0.15f);
-      SetF(params, RF2_V_HOLD,          0.1f);
-      SetF(params, RF2_BURST_LOCK,      0.15f);
+      SetF(params, RF2_GHOST_ENSEMBLE,  0.30f);
+      SetF(params, RF2_LINE_JITTER,     0.45f);
+      SetF(params, RF2_AFC_HUNT,        0.15f);
+      SetF(params, RF2_RF_DRIFT,        0.15f);
+      SetF(params, RF2_AM_NONLINEARITY, 0.12f);
+      SetF(params, RF2_IMPULSE_NOISE,   0.10f);
+      SetF(params, RF2_AGC_PUMP,        0.08f);
+      SetF(params, RF2_HUM,             0.08f);
+      SetF(params, RF2_CHROMA_FLUTTER,  0.08f);
+      SetF(params, RF2_YC_CROSSTALK,    0.12f);
+      SetF(params, RF2_H_SYNC_NOISE,    3.0f);
+      SetF(params, RF2_V_SYNC_NOISE,    2.0f);
+      SetF(params, RF2_BURST_NOISE,     3.5f);
+      SetF(params, RF2_H_LOCK,          0.10f);
+      SetF(params, RF2_V_HOLD,          0.06f);
+      SetF(params, RF2_BURST_LOCK,      0.10f);
       SetF(params, RF2_GROUP_DELAY,     0.25f);
       break;
 
     case RF2_PRESET_GOOD_VHS:
-      // Good VHS — fresh tape, well-aligned deck, clean recording.
-      SetF(params, RF2_BRIGHTNESS,      0.01f);
-      SetF(params, RF2_CONTRAST,        0.98f);
-      SetF(params, RF2_SATURATION,      0.85f);
+      // Fresh tape, good deck. VHS feel, no visible noise.
+      SetF(params, RF2_LUMA_CUTOFF,     3.0f);
+      SetF(params, RF2_I_CUTOFF,        0.5f);
+      SetF(params, RF2_Q_CUTOFF,        0.3f);
+      SetF(params, RF2_FILTER_PASSES,   2.0f);
+      SetF(params, RF2_CHROMA_MOD_SCALE,0.80f);
+      SetF(params, RF2_SATURATION,      0.95f);
       SetF(params, RF2_TINT,            0.5f);
       SetF(params, RF2_CHROMA_DELAY,    0.3f);
-      SetF(params, RF2_BURST_LOCK,      0.02f);
-      SetF(params, RF2_NOISE,           1.2f);
-      SetF(params, RF2_NOISE_COLOR,     0.4f);
+      SetF(params, RF2_NOISE,           0.8f);
+      SetF(params, RF2_NOISE_COLOR,     0.35f);
       SetF(params, RF2_LINE_JITTER,     0.05f);
       SetF(params, RF2_AM_NONLINEARITY, 0.02f);
-      SetF(params, RF2_HUM,             0.01f);
       SetF(params, RF2_CHROMA_FLUTTER,  0.03f);
       SetF(params, RF2_YC_CROSSTALK,    0.05f);
       SetF(params, RF2_H_SYNC_NOISE,    0.3f);
-      SetF(params, RF2_BURST_NOISE,     0.5f);
-      SetF(params, RF2_VHS_HEAD_SWITCH, 0.25f);
-      SetF(params, RF2_GROUP_DELAY,     0.1f);
-      SetF(params, RF2_LUMA_CUTOFF,     3.2f);
-      SetF(params, RF2_I_CUTOFF,        0.9f);
-      SetF(params, RF2_Q_CUTOFF,        0.4f);
+      SetF(params, RF2_BURST_NOISE,     0.4f);
+      SetF(params, RF2_BURST_LOCK,      0.02f);
+      SetF(params, RF2_VHS_HEAD_SWITCH, 0.30f);
+      SetF(params, RF2_GROUP_DELAY,     0.08f);
       break;
 
-    case RF2_PRESET_WORN_VHS:
-      // Worn VHS — older tape, played a number of times.
-      SetF(params, RF2_BRIGHTNESS,      0.02f);
-      SetF(params, RF2_CONTRAST,        0.95f);
-      SetF(params, RF2_SATURATION,      0.8f);
+    case RF2_PRESET_DIRTY_HEAD_VHS:
+      // Oxide deposits on heads. Dropouts and noise, tape undamaged.
+      SetF(params, RF2_LUMA_CUTOFF,     3.0f);
+      SetF(params, RF2_I_CUTOFF,        0.5f);
+      SetF(params, RF2_Q_CUTOFF,        0.3f);
+      SetF(params, RF2_FILTER_PASSES,   2.0f);
+      SetF(params, RF2_CHROMA_MOD_SCALE,0.80f);
+      SetF(params, RF2_BRIGHTNESS,      0.01f);
+      SetF(params, RF2_CONTRAST,        0.97f);
+      SetF(params, RF2_SATURATION,      0.88f);
       SetF(params, RF2_TINT,            1.0f);
       SetF(params, RF2_CHROMA_DELAY,    0.5f);
-      SetF(params, RF2_H_LOCK,          0.03f);
-      SetF(params, RF2_BURST_LOCK,      0.05f);
-      SetF(params, RF2_NOISE,           2.5f);
-      SetF(params, RF2_NOISE_COLOR,     0.5f);
-      SetF(params, RF2_LINE_JITTER,     0.15f);
+      SetF(params, RF2_NOISE,           2.0f);
+      SetF(params, RF2_NOISE_COLOR,     0.45f);
+      SetF(params, RF2_LINE_JITTER,     0.10f);
       SetF(params, RF2_AM_NONLINEARITY, 0.03f);
-      SetF(params, RF2_AGC_PUMP,        0.03f);
+      SetF(params, RF2_AGC_PUMP,        0.02f);
       SetF(params, RF2_HUM,             0.02f);
       SetF(params, RF2_CHROMA_FLUTTER,  0.08f);
-      SetF(params, RF2_YC_CROSSTALK,    0.1f);
-      SetF(params, RF2_H_SYNC_NOISE,    1.0f);
-      SetF(params, RF2_V_SYNC_NOISE,    0.5f);
+      SetF(params, RF2_YC_CROSSTALK,    0.10f);
+      SetF(params, RF2_H_SYNC_NOISE,    0.8f);
+      SetF(params, RF2_V_SYNC_NOISE,    0.4f);
       SetF(params, RF2_BURST_NOISE,     1.5f);
-      SetF(params, RF2_VHS_HEAD_SWITCH, 0.4f);
-      SetF(params, RF2_VHS_DROPOUTS,    0.05f);
-      SetF(params, RF2_GROUP_DELAY,     0.2f);
-      SetF(params, RF2_LUMA_CUTOFF,     3.0f);
-      SetF(params, RF2_I_CUTOFF,        0.8f);
-      SetF(params, RF2_Q_CUTOFF,        0.4f);
+      SetF(params, RF2_BURST_LOCK,      0.05f);
+      SetF(params, RF2_VHS_HEAD_SWITCH, 0.50f);
+      SetF(params, RF2_VHS_DROPOUTS,    0.15f);
+      SetF(params, RF2_GROUP_DELAY,     0.15f);
       break;
 
-    case RF2_PRESET_DAMAGED_VHS:
-      // Damaged VHS — old tape, many plays, mechanical wear.
-      SetF(params, RF2_BRIGHTNESS,      0.03f);
-      SetF(params, RF2_CONTRAST,        0.9f);
-      SetF(params, RF2_SATURATION,      0.65f);
+    case RF2_PRESET_DAMAGED_TAPE_VHS:
+      // Old tape, physical damage, worn edges, oxide deterioration.
+      SetF(params, RF2_LUMA_CUTOFF,     2.8f);
+      SetF(params, RF2_I_CUTOFF,        0.45f);
+      SetF(params, RF2_Q_CUTOFF,        0.28f);
+      SetF(params, RF2_FILTER_PASSES,   2.0f);
+      SetF(params, RF2_CHROMA_MOD_SCALE,0.78f);
+      SetF(params, RF2_BRIGHTNESS,      0.02f);
+      SetF(params, RF2_CONTRAST,        0.92f);
+      SetF(params, RF2_SATURATION,      0.75f);
       SetF(params, RF2_TINT,            2.0f);
       SetF(params, RF2_CHROMA_DELAY,    1.0f);
-      SetF(params, RF2_H_LOCK,          0.15f);
-      SetF(params, RF2_V_HOLD,          0.08f);
-      SetF(params, RF2_BURST_LOCK,      0.2f);
-      SetF(params, RF2_NOISE,           5.0f);
-      SetF(params, RF2_NOISE_COLOR,     0.6f);
-      SetF(params, RF2_LINE_JITTER,     0.4f);
-      SetF(params, RF2_AFC_HUNT,        0.05f);
-      SetF(params, RF2_RF_DRIFT,        0.05f);
-      SetF(params, RF2_AM_NONLINEARITY, 0.1f);
-      SetF(params, RF2_IMPULSE_NOISE,   0.05f);
-      SetF(params, RF2_AGC_PUMP,        0.08f);
-      SetF(params, RF2_HUM,             0.05f);
-      SetF(params, RF2_CHROMA_FLUTTER,  0.25f);
-      SetF(params, RF2_YC_CROSSTALK,    0.2f);
-      SetF(params, RF2_H_SYNC_NOISE,    3.0f);
-      SetF(params, RF2_V_SYNC_NOISE,    2.0f);
-      SetF(params, RF2_BURST_NOISE,     4.0f);
-      SetF(params, RF2_VHS_TRACKING,    0.25f);
-      SetF(params, RF2_VHS_WRINKLE,     0.25f);
-      SetF(params, RF2_VHS_HEAD_SWITCH, 0.7f);
-      SetF(params, RF2_VHS_DROPOUTS,    0.3f);
-      SetF(params, RF2_GROUP_DELAY,     0.35f);
-      SetF(params, RF2_LUMA_CUTOFF,     2.5f);
-      SetF(params, RF2_I_CUTOFF,        0.6f);
-      SetF(params, RF2_Q_CUTOFF,        0.35f);
+      SetF(params, RF2_H_LOCK,          0.08f);
+      SetF(params, RF2_V_HOLD,          0.06f);
+      SetF(params, RF2_BURST_LOCK,      0.15f);
+      SetF(params, RF2_NOISE,           4.0f);
+      SetF(params, RF2_NOISE_COLOR,     0.55f);
+      SetF(params, RF2_LINE_JITTER,     0.30f);
+      SetF(params, RF2_AM_NONLINEARITY, 0.08f);
+      SetF(params, RF2_IMPULSE_NOISE,   0.04f);
+      SetF(params, RF2_AGC_PUMP,        0.06f);
+      SetF(params, RF2_HUM,             0.04f);
+      SetF(params, RF2_CHROMA_FLUTTER,  0.20f);
+      SetF(params, RF2_YC_CROSSTALK,    0.18f);
+      SetF(params, RF2_H_SYNC_NOISE,    2.5f);
+      SetF(params, RF2_V_SYNC_NOISE,    1.5f);
+      SetF(params, RF2_BURST_NOISE,     3.5f);
+      SetF(params, RF2_VHS_TRACKING,    0.20f);
+      SetF(params, RF2_VHS_WRINKLE,     0.20f);
+      SetF(params, RF2_VHS_HEAD_SWITCH, 0.60f);
+      SetF(params, RF2_VHS_DROPOUTS,    0.25f);
+      SetF(params, RF2_GROUP_DELAY,     0.25f);
       break;
   }
 }
@@ -356,12 +373,13 @@ static PF_Err ParamsSetup(PF_InData* in_data, PF_OutData* out_data,
   def.flags = PF_ParamFlag_SUPERVISE;
   PF_ADD_POPUP("Preset", RF2_NUM_PRESETS, RF2_PRESET_CUSTOM,
                "Custom"
-               "|Studio Monitor"
-               "|Broadcast RF"
-               "|Weak RF"
+               "|Clean"
+               "|Good RF"
+               "|Average RF"
+               "|Bad RF"
                "|Good VHS"
-               "|Worn VHS"
-               "|Damaged VHS",
+               "|Dirty Head VHS"
+               "|Damaged Tape VHS",
                RF2_PRESET);
 
   // -- Decode controls -------------------------------------------------------
