@@ -33,7 +33,7 @@ tape transport model.
 ## Installation
 
 Download the latest release for your platform from the
-[Releases](releases/) page:
+[Releases](../../releases/) page:
 
 - **macOS**: Open the `.dmg` and run the installer package.
 - **Windows**: Run the `.exe` installer.
