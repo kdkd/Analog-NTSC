@@ -1098,22 +1098,60 @@ void ApplyCompositeEffectsInternal(std::vector<float>* frame_ire,
     }
   }
 
-  if (noise_stddev_ire > 0.0f) {
-    if (noise_color > 0.001f) {
-      // Paul Kellet's pink noise filter (3 state variables).
-      float b0 = 0.0f, b1 = 0.0f, b2 = 0.0f;
-      for (float& sample : *frame_ire) {
+  if (noise_stddev_ire > 0.0f && lines_per_frame > 0 && samples_per_line > 0) {
+    std::vector<float> noise_line(samples_per_line);
+    // The receiver's IF filter and CRT spot size limit noise bandwidth,
+    // creating the characteristic horizontally-elongated snow pattern of
+    // real RF reception.  Without this the noise is per-sample (sub-pixel)
+    // and appears as fine fuzz rather than visible snow flecks.
+    constexpr float kCompositeSampleRateHz = 315000000.0f / 22.0f;
+    constexpr float kNoiseBandwidthHz = 800000.0f;
+    const float nf_alpha = 1.0f - std::exp(
+        -kTwoPi * kNoiseBandwidthHz / kCompositeSampleRateHz);
+    // RMS compensation for the bidirectional one-pole (two-pole) filter.
+    // Output variance of unit white noise through two cascaded one-pole
+    // filters with coefficient a is: a(2-2a+a²)/(2-a)³.
+    const float a = nf_alpha;
+    const float denom = (2.0f - a) * (2.0f - a) * (2.0f - a);
+    const float two_pole_var = a * (2.0f - 2.0f * a + a * a) / denom;
+    const float compensate = 1.0f / std::max(0.01f, std::sqrt(two_pole_var));
+
+    // Paul Kellet pink noise state (persists across lines).
+    float b0 = 0.0f, b1 = 0.0f, b2 = 0.0f;
+
+    for (uint32_t line = 0; line < lines_per_frame; ++line) {
+      float* row = frame_ire->data() + static_cast<size_t>(line) * samples_per_line;
+
+      // Generate spectrally-shaped noise for this line.
+      for (uint32_t s = 0; s < samples_per_line; ++s) {
         const float white = noise(rng);
-        b0 = 0.99765f * b0 + white * 0.0990460f;
-        b1 = 0.96300f * b1 + white * 0.2965164f;
-        b2 = 0.57000f * b2 + white * 1.0526913f;
-        const float pink = (b0 + b1 + b2 + white * 0.1848f) * 0.22f;
-        const float n = white * (1.0f - noise_color) + pink * noise_color;
-        sample = Clamp(sample + n, -60.0f, 140.0f);
+        if (noise_color > 0.001f) {
+          b0 = 0.99765f * b0 + white * 0.0990460f;
+          b1 = 0.96300f * b1 + white * 0.2965164f;
+          b2 = 0.57000f * b2 + white * 1.0526913f;
+          const float pink = (b0 + b1 + b2 + white * 0.1848f) * 0.22f;
+          noise_line[s] = white * (1.0f - noise_color) + pink * noise_color;
+        } else {
+          noise_line[s] = white;
+        }
       }
-    } else {
-      for (float& sample : *frame_ire) {
-        sample = Clamp(sample + noise(rng), -60.0f, 140.0f);
+
+      // Bidirectional one-pole lowpass (forward then backward) gives
+      // symmetric grain and a second-order rolloff.
+      float state = noise_line[0];
+      for (uint32_t s = 1; s < samples_per_line; ++s) {
+        state += nf_alpha * (noise_line[s] - state);
+        noise_line[s] = state;
+      }
+      state = noise_line[samples_per_line - 1];
+      for (int s = static_cast<int>(samples_per_line) - 2; s >= 0; --s) {
+        state += nf_alpha * (noise_line[s] - state);
+        noise_line[s] = state;
+      }
+
+      // Add to signal with amplitude compensation.
+      for (uint32_t s = 0; s < samples_per_line; ++s) {
+        row[s] = Clamp(row[s] + noise_line[s] * compensate, -60.0f, 140.0f);
       }
     }
   }
