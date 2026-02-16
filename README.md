@@ -6,6 +6,8 @@ distortion overlays onto your footage, this plugin actually encodes each frame
 into a synthetic NTSC composite signal, applies signal-domain effects to it, then
 decodes it back to RGB.
 
+https://github.com/user-attachments/assets/3f0d19be-d2ae-4d8b-bdac-718a49deb01f
+
 This matters because NTSC's visual characteristics — the softened luma, the
 limited chroma bandwidth, the dot-crawl patterns, the color bleeding on sharp
 transitions — are all consequences of how the signal is encoded and decoded. A
