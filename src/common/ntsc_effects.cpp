@@ -69,17 +69,30 @@ void ApplyCompositeEffectsInternal(std::vector<float>* frame_ire,
   // Estimate the blanking-interval (back porch) level for a scanline.
   // Used by DC restoration after multipath and by AGC pump.
   auto estimate_blank_simple = [&](const float* row) -> float {
-    const uint32_t start = std::min<uint32_t>(samples_per_line, hsync_samples + 6U);
-    const uint32_t end = std::min<uint32_t>(samples_per_line, burst_start);
-    if (start >= end) {
-      return 0.0f;
-    }
     float sum = 0.0f;
     uint32_t n = 0;
-    for (uint32_t s = start; s < end; ++s) {
+
+    const uint32_t pre_start =
+        std::min<uint32_t>(samples_per_line, hsync_samples + 6U);
+    const uint32_t pre_end = std::min<uint32_t>(
+        samples_per_line, (burst_start > 2U) ? (burst_start - 2U) : burst_start);
+    for (uint32_t s = pre_start; s < pre_end; ++s) {
       sum += row[s];
       ++n;
     }
+
+    const uint32_t post_start = std::min<uint32_t>(
+        samples_per_line, burst_start + burst_samples + 3U);
+    const uint32_t active_start = std::max<uint32_t>(
+        hsync_samples + 40U, burst_start + burst_samples + 4U);
+    const uint32_t post_end = std::min<uint32_t>(
+        samples_per_line,
+        (active_start > 2U) ? (active_start - 2U) : active_start);
+    for (uint32_t s = post_start; s < post_end; ++s) {
+      sum += row[s];
+      ++n;
+    }
+
     return n > 0 ? (sum / static_cast<float>(n)) : 0.0f;
   };
 
@@ -581,17 +594,30 @@ void ApplyCompositeEffectsInternal(std::vector<float>* frame_ire,
 
   if (has_vhs && lines_per_frame > 0 && samples_per_line > 0) {
     auto estimate_blank = [&](const float* row) -> float {
-      const uint32_t start = std::min<uint32_t>(samples_per_line, hsync_samples + 6U);
-      const uint32_t end = std::min<uint32_t>(samples_per_line, burst_start);
-      if (start >= end) {
-        return 0.0f;
-      }
       float sum = 0.0f;
       uint32_t n = 0;
-      for (uint32_t s = start; s < end; ++s) {
+
+      const uint32_t pre_start =
+          std::min<uint32_t>(samples_per_line, hsync_samples + 6U);
+      const uint32_t pre_end = std::min<uint32_t>(
+          samples_per_line, (burst_start > 2U) ? (burst_start - 2U) : burst_start);
+      for (uint32_t s = pre_start; s < pre_end; ++s) {
         sum += row[s];
         ++n;
       }
+
+      const uint32_t post_start = std::min<uint32_t>(
+          samples_per_line, burst_start + burst_samples + 3U);
+      const uint32_t active_gate = std::max<uint32_t>(
+          hsync_samples + 40U, burst_start + burst_samples + 4U);
+      const uint32_t post_end = std::min<uint32_t>(
+          samples_per_line,
+          (active_gate > 2U) ? (active_gate - 2U) : active_gate);
+      for (uint32_t s = post_start; s < post_end; ++s) {
+        sum += row[s];
+        ++n;
+      }
+
       return n > 0 ? (sum / static_cast<float>(n)) : 0.0f;
     };
 
@@ -1169,12 +1195,17 @@ void ApplyCompositeEffectsInternal(std::vector<float>* frame_ire,
 
   if (noise_stddev_ire > 0.0f && lines_per_frame > 0 && samples_per_line > 0) {
     std::vector<float> noise_line(samples_per_line);
-    // The receiver's IF filter and CRT spot size limit noise bandwidth,
-    // creating the characteristic horizontally-elongated snow pattern of
-    // real RF reception.  Without this the noise is per-sample (sub-pixel)
-    // and appears as fine fuzz rather than visible snow flecks.
+    std::vector<float> raw_noise_line(samples_per_line);
+    // At low noise levels, keep the existing softer bandwidth-limited feel.
+    // As noise rises toward full "snow", widen the effective bandwidth and
+    // blend in a little unfiltered detail so static doesn't look over-smoothed.
     constexpr float kCompositeSampleRateHz = 315000000.0f / 22.0f;
-    constexpr float kNoiseBandwidthHz = 800000.0f;
+    const float noise_norm = Clamp(noise_stddev_ire / 10.0f, 0.0f, 1.0f);
+    const float kNoiseBandwidthLoHz = 800000.0f;
+    const float kNoiseBandwidthHiHz = 2500000.0f;
+    const float kNoiseBandwidthHz =
+        kNoiseBandwidthLoHz +
+        (kNoiseBandwidthHiHz - kNoiseBandwidthLoHz) * std::pow(noise_norm, 0.85f);
     const float nf_alpha = 1.0f - std::exp(
         -kTwoPi * kNoiseBandwidthHz / kCompositeSampleRateHz);
     // RMS compensation for the bidirectional one-pole (two-pole) filter.
@@ -1184,6 +1215,10 @@ void ApplyCompositeEffectsInternal(std::vector<float>* frame_ire,
     const float denom = (2.0f - a) * (2.0f - a) * (2.0f - a);
     const float two_pole_var = a * (2.0f - 2.0f * a + a * a) / denom;
     const float compensate = 1.0f / std::max(0.01f, std::sqrt(two_pole_var));
+    const float detail_mix = 0.55f * std::pow(noise_norm, 1.25f);
+    const float effective_noise_color =
+        Clamp(noise_color * (1.0f - 0.85f * std::pow(noise_norm, 1.1f)), 0.0f, 1.0f);
+    const float line_dc_reject = 0.88f * std::pow(noise_norm, 1.05f);
 
     // Paul Kellet pink noise state (persists across lines).
     float b0 = 0.0f, b1 = 0.0f, b2 = 0.0f;
@@ -1191,18 +1226,20 @@ void ApplyCompositeEffectsInternal(std::vector<float>* frame_ire,
     for (uint32_t line = 0; line < lines_per_frame; ++line) {
       float* row = frame_ire->data() + static_cast<size_t>(line) * samples_per_line;
 
-      // Generate spectrally-shaped noise for this line.
+      // Generate spectrally-shaped base noise for this line.
       for (uint32_t s = 0; s < samples_per_line; ++s) {
         const float white = noise(rng);
-        if (noise_color > 0.001f) {
+        if (effective_noise_color > 0.001f) {
           b0 = 0.99765f * b0 + white * 0.0990460f;
           b1 = 0.96300f * b1 + white * 0.2965164f;
           b2 = 0.57000f * b2 + white * 1.0526913f;
           const float pink = (b0 + b1 + b2 + white * 0.1848f) * 0.22f;
-          noise_line[s] = white * (1.0f - noise_color) + pink * noise_color;
+          raw_noise_line[s] =
+              white * (1.0f - effective_noise_color) + pink * effective_noise_color;
         } else {
-          noise_line[s] = white;
+          raw_noise_line[s] = white;
         }
+        noise_line[s] = raw_noise_line[s];
       }
 
       // Bidirectional one-pole lowpass (forward then backward) gives
@@ -1218,9 +1255,28 @@ void ApplyCompositeEffectsInternal(std::vector<float>* frame_ire,
         noise_line[s] = state;
       }
 
-      // Add to signal with amplitude compensation.
+      float line_sum = 0.0f;
+      float line_sq = 0.0f;
       for (uint32_t s = 0; s < samples_per_line; ++s) {
-        row[s] = Clamp(row[s] + noise_line[s] * compensate, -60.0f, 140.0f);
+        const float filtered = noise_line[s] * compensate;
+        raw_noise_line[s] =
+            filtered * (1.0f - detail_mix) + raw_noise_line[s] * detail_mix;
+        line_sum += raw_noise_line[s];
+        line_sq += raw_noise_line[s] * raw_noise_line[s];
+      }
+      const float line_mean = line_sum / static_cast<float>(samples_per_line);
+      float centered_sq = 0.0f;
+      for (uint32_t s = 0; s < samples_per_line; ++s) {
+        noise_line[s] = raw_noise_line[s] - line_mean * line_dc_reject;
+        centered_sq += noise_line[s] * noise_line[s];
+      }
+      float renorm = 1.0f;
+      if (centered_sq > 1e-6f && line_sq > 1e-6f) {
+        renorm = std::sqrt(line_sq / centered_sq);
+      }
+      renorm = Clamp(renorm, 0.7f, 2.2f);
+      for (uint32_t s = 0; s < samples_per_line; ++s) {
+        row[s] = Clamp(row[s] + noise_line[s] * renorm, -60.0f, 140.0f);
       }
     }
   }

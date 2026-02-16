@@ -36,7 +36,7 @@ static const ParamMeta kParamTable[] = {
 
     // -- Signal effects --
     {ParamId::kNoiseStddevIre, ParamType::kFloat, ParamCategory::kEffects,
-     "Noise", "noise_stddev_ire", 0.0f, 10.0f, 0.0f, "IRE"},
+     "Noise", "noise_stddev_ire", 0.0f, 20.0f, 0.0f, "IRE"},
     {ParamId::kMultipathGain, ParamType::kFloat, ParamCategory::kEffects,
      "Ghost Gain", "multipath_gain", 0.0f, 1.0f, 0.0f, ""},
     {ParamId::kMultipathDelaySamples, ParamType::kUint32, ParamCategory::kEffects,

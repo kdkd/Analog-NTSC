@@ -497,7 +497,7 @@ static PF_Err ParamsSetup(PF_InData* in_data, PF_OutData* out_data,
              PF_Precision_HUNDREDTHS, RF2_BURST_LOCK);
 
   // -- Signal effects --------------------------------------------------------
-  ADD_SLIDER("Noise",           0.0, 10.0,  0.0, 10.0,  0.0,
+  ADD_SLIDER("Noise",           0.0, 20.0,  0.0, 20.0,  0.0,
              PF_Precision_TENTHS, RF2_NOISE);
   ADD_SLIDER("Ghost Gain",     0.0,  1.0,  0.0,  1.0,  0.0,
              PF_Precision_HUNDREDTHS, RF2_GHOST_GAIN);

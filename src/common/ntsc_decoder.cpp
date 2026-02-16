@@ -27,23 +27,78 @@ float SampleLine(const float* line, uint32_t samples_per_line, int index) {
 }
 
 float EstimateBlankLevel(const float* line, const NtscTiming& t) {
-  const uint32_t start = t.hsync_samples + 6;
-  const uint32_t end = std::min<uint32_t>(t.burst_start, t.samples_per_line);
-  if (start >= end) {
-    return 0.0f;
-  }
   float sum = 0.0f;
   uint32_t count = 0;
-  for (uint32_t s = start; s < end; ++s) {
+
+  const uint32_t pre_start = std::min<uint32_t>(t.samples_per_line, t.hsync_samples + 6U);
+  const uint32_t pre_end =
+      std::min<uint32_t>(t.samples_per_line, (t.burst_start > 2U) ? (t.burst_start - 2U) : t.burst_start);
+  for (uint32_t s = pre_start; s < pre_end; ++s) {
     sum += line[s];
     ++count;
   }
+
+  const uint32_t post_start =
+      std::min<uint32_t>(t.samples_per_line, t.burst_start + t.burst_samples + 3U);
+  const uint32_t post_end =
+      std::min<uint32_t>(t.samples_per_line, (t.active_start > 2U) ? (t.active_start - 2U) : t.active_start);
+  for (uint32_t s = post_start; s < post_end; ++s) {
+    sum += line[s];
+    ++count;
+  }
+
   return count ? (sum / static_cast<float>(count)) : 0.0f;
+}
+
+std::vector<float> BuildBlankLevels(const std::vector<float>& frame_ire,
+                                    const NtscTiming& t) {
+  std::vector<float> raw(t.lines_per_frame, 0.0f);
+  for (uint32_t line = 0; line < t.lines_per_frame; ++line) {
+    const float* row =
+        frame_ire.data() + static_cast<size_t>(line) * t.samples_per_line;
+    raw[line] = EstimateBlankLevel(row, t);
+  }
+  if (t.lines_per_frame < 3) {
+    return raw;
+  }
+
+  float hf_sum = 0.0f;
+  uint32_t hf_count = 0;
+  for (uint32_t i = 1; i + 1 < t.lines_per_frame; ++i) {
+    const float neigh = 0.5f * (raw[i - 1] + raw[i + 1]);
+    hf_sum += std::fabs(raw[i] - neigh);
+    ++hf_count;
+  }
+  const float hf_metric =
+      (hf_count > 0) ? (hf_sum / static_cast<float>(hf_count)) : 0.0f;
+  // Treat line-to-line back-porch jitter above ~0.25 IRE as mostly noise and
+  // smooth toward neighboring lines. This approximates clamp hold behavior and
+  // suppresses row-wide striping under heavy RF noise.
+  const float smooth_strength =
+      Clamp((hf_metric - 0.25f) / 1.75f, 0.0f, 1.0f) * 0.90f;
+  if (smooth_strength <= 1e-4f) {
+    return raw;
+  }
+
+  std::vector<float> filtered(t.lines_per_frame, 0.0f);
+  for (uint32_t i = 0; i < t.lines_per_frame; ++i) {
+    const uint32_t im2 = (i >= 2) ? (i - 2) : 0;
+    const uint32_t im1 = (i >= 1) ? (i - 1) : 0;
+    const uint32_t ip1 = std::min<uint32_t>(t.lines_per_frame - 1, i + 1);
+    const uint32_t ip2 = std::min<uint32_t>(t.lines_per_frame - 1, i + 2);
+    const float smooth =
+        (raw[im2] + 4.0f * raw[im1] + 6.0f * raw[i] + 4.0f * raw[ip1] +
+         raw[ip2]) /
+        16.0f;
+    filtered[i] = raw[i] + (smooth - raw[i]) * smooth_strength;
+  }
+  return filtered;
 }
 
 struct BurstStats {
   float phase = 0.0f;
   float amplitude = 0.0f;
+  float snr = 0.0f;
 };
 
 // cos(s * pi/2) and sin(s * pi/2) cycle with period 4.
@@ -68,6 +123,24 @@ BurstStats EstimateBurstStats(const float* line, const NtscTiming& t, float blan
   out.phase = std::atan2(im, re);
   if (count > 0) {
     out.amplitude = std::sqrt(re * re + im * im) / static_cast<float>(count);
+    // Least-squares carrier estimate on the quadrature basis:
+    // v ~= a*cos + b*sin, with a=2*re/N and b=2*im/N.
+    const float a = (2.0f * re) / static_cast<float>(count);
+    const float b = (2.0f * im) / static_cast<float>(count);
+    float resid_sq = 0.0f;
+    for (uint32_t i = 0; i < t.burst_samples; ++i) {
+      const uint32_t s = t.burst_start + i;
+      if (s >= t.samples_per_line) {
+        break;
+      }
+      const float v = line[s] - blank;
+      const float pred = a * kCos90[s & 3] + b * kSin90[s & 3];
+      const float e = v - pred;
+      resid_sq += e * e;
+    }
+    const float resid_rms = std::sqrt(resid_sq / static_cast<float>(count));
+    const float carrier_peak = std::sqrt(a * a + b * b);
+    out.snr = carrier_peak / std::max(0.1f, resid_rms);
   }
   return out;
 }
@@ -207,6 +280,7 @@ void NtscDecoder::Decode(const std::vector<float>& frame_ire,
   if (frame_ire.size() < expected_samples) {
     return;
   }
+  const std::vector<float> blank_levels = BuildBlankLevels(frame_ire, t);
 
   // PLL instability params: use directly (0-1 range) with same power curves
   // as the original code used for (noise_ire / 16.0).
@@ -370,7 +444,7 @@ void NtscDecoder::Decode(const std::vector<float>& frame_ire,
         continue;
       }
       const float* row = frame_ire.data() + static_cast<size_t>(line) * t.samples_per_line;
-      const float blank = EstimateBlankLevel(row, t);
+      const float blank = blank_levels[static_cast<uint32_t>(line)];
       amp_sum += EstimateBurstStats(row, t, blank).amplitude;
       ++amp_count;
     }
@@ -421,11 +495,18 @@ void NtscDecoder::Decode(const std::vector<float>& frame_ire,
     if (line < 0) line += total_lines;
 
     const float* cur = frame_ire.data() + static_cast<size_t>(line) * t.samples_per_line;
-    const float blank = EstimateBlankLevel(cur, t);
+    const float blank = blank_levels[static_cast<uint32_t>(line)];
     const BurstStats burst = EstimateBurstStats(cur, t, blank);
     float decode_phase = -0.5f * kPi - burst.phase;
 
-    float chroma_lock = 1.0f;
+    // Noise-driven chroma control: avoid full color-kill in normal weak-RF
+    // conditions, but suppress high-frequency rainbow noise when burst SNR is
+    // poor by blending toward a slower chroma estimate.
+    const float burst_snr_gate = Clamp((burst.snr - 0.8f) / 3.6f, 0.0f, 1.0f);
+    const float burst_snr_floor = 0.30f;
+    float chroma_lock = burst_snr_floor + (1.0f - burst_snr_floor) * burst_snr_gate;
+    const float chroma_noise_suppress =
+        Clamp((2.2f - burst.snr) / 2.2f, 0.0f, 1.0f);
     if (enable_burst_lock_tracking) {
       const int parity = line & 1;
       if (!burst_phase_initialized[parity]) {
@@ -440,7 +521,7 @@ void NtscDecoder::Decode(const std::vector<float>& frame_ire,
       decode_phase = -0.5f * kPi - burst_phase_state[parity];
 
       const float line_gate = Clamp((burst.amplitude - 1.0f) / 7.0f, 0.0f, 1.0f);
-      chroma_lock = frame_chroma_gate * (0.9f + 0.1f * line_gate);
+      chroma_lock *= frame_chroma_gate * (0.9f + 0.1f * line_gate);
     }
 
     const float* prev = nullptr;
@@ -449,11 +530,11 @@ void NtscDecoder::Decode(const std::vector<float>& frame_ire,
     float next_blank = blank;
     if (line > 0) {
       prev = frame_ire.data() + static_cast<size_t>(line - 1) * t.samples_per_line;
-      prev_blank = EstimateBlankLevel(prev, t);
+      prev_blank = blank_levels[static_cast<uint32_t>(line - 1)];
     }
     if (static_cast<uint32_t>(line + 1) < t.lines_per_frame) {
       next = frame_ire.data() + static_cast<size_t>(line + 1) * t.samples_per_line;
-      next_blank = EstimateBlankLevel(next, t);
+      next_blank = blank_levels[static_cast<uint32_t>(line + 1)];
     }
 
     // Precompute demodulation cos/sin for the 4 phase slots on this line.
@@ -469,6 +550,8 @@ void NtscDecoder::Decode(const std::vector<float>& frame_ire,
     const float inv_chroma_gain = 0.5f / config_.levels.chroma_gain_ire;
     float i_state = 0.0f;
     float q_state = 0.0f;
+    float i_state_slow = 0.0f;
+    float q_state_slow = 0.0f;
 
     for (int x = 0; x < 720; ++x) {
       int s = 0;
@@ -512,9 +595,18 @@ void NtscDecoder::Decode(const std::vector<float>& frame_ire,
 
       i_state += alpha_i * (i_est - i_state);
       q_state += alpha_q * (q_est - q_state);
+      const float alpha_i_slow = alpha_i * 0.14f;
+      const float alpha_q_slow = alpha_q * 0.14f;
+      i_state_slow += alpha_i_slow * (i_est - i_state_slow);
+      q_state_slow += alpha_q_slow * (q_est - q_state_slow);
 
-      float i_rot = i_state * tint_cos - q_state * tint_sin;
-      float q_rot = i_state * tint_sin + q_state * tint_cos;
+      const float i_used =
+          i_state * (1.0f - chroma_noise_suppress) + i_state_slow * chroma_noise_suppress;
+      const float q_used =
+          q_state * (1.0f - chroma_noise_suppress) + q_state_slow * chroma_noise_suppress;
+
+      float i_rot = i_used * tint_cos - q_used * tint_sin;
+      float q_rot = i_used * tint_sin + q_used * tint_cos;
       SoftLimitChroma(&i_rot, &q_rot, 0.42f);
       i_rot *= controls.saturation * chroma_lock;
       q_rot *= controls.saturation * chroma_lock;

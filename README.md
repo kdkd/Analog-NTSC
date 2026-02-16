@@ -87,7 +87,7 @@ These operate on the composite signal between encoding and decoding.
 
 | Parameter | Range | Default | Description |
 |---|---|---|---|
-| Noise | 0.0 – 10.0 | 0.0 | Additive Gaussian noise in IRE. Because it's added to the composite signal, it degrades chroma (which occupies a narrow band around 3.58 MHz) disproportionately more than luma. |
+| Noise | 0.0 – 20.0 | 0.0 | Additive Gaussian noise in IRE. Because it's added to the composite signal, it degrades chroma (which occupies a narrow band around 3.58 MHz) disproportionately more than luma. |
 | Noise Color | 0.0 – 1.0 | 0.0 | Blends between white noise (0) and pink/1/f noise (1). Pink noise has more low-frequency energy and looks more like real RF/amplifier noise. |
 | Ghost Gain | 0.0 – 1.0 | 0.0 | Amplitude of the multipath reflection. |
 | Ghost Delay | 1 – 200 | 24 | Delay of the ghost in composite samples. Higher values push the ghost further to the right. |
