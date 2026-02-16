@@ -6,6 +6,7 @@
 
 #include <algorithm>
 #include <cmath>
+#include <cstdint>
 #include <cstdlib>
 #include <vector>
 
@@ -30,6 +31,30 @@ inline bool IsSdRaster43Candidate(int w, int h) {
   const bool sd_h = (h == 480 || h == 486);
   const bool sd_w = (w == 640 || w == 704 || w == 720);
   return sd_w && sd_h;
+}
+
+uint32_t FrameIndexFromClock(int64_t frame_clock) {
+  const uint64_t mag =
+      (frame_clock >= 0) ? static_cast<uint64_t>(frame_clock)
+                         : static_cast<uint64_t>(-(frame_clock + 1)) + 1ULL;
+  return static_cast<uint32_t>(mag & 0xFFFFFFFFu);
+}
+
+int64_t FrameClockFromInData(const PF_InData* in_data) {
+  if (!in_data) {
+    return 0;
+  }
+  const int64_t now = static_cast<int64_t>(in_data->current_time);
+  const int64_t step = static_cast<int64_t>(in_data->time_step);
+  if (step != 0) {
+    return now / step;
+  }
+  const int64_t local_step = static_cast<int64_t>(in_data->local_time_step);
+  if (local_step != 0) {
+    return now / local_step;
+  }
+  // Synthetic sources can report 0 for both steps; use timeline ticks.
+  return now;
 }
 
 void ScaleInputToNtsc(const uint8_t* bgra, int srcW, int srcH, int rowBytes,
@@ -405,6 +430,7 @@ static PF_Err GlobalSetup(PF_InData* in_data, PF_OutData* out_data,
                                  PrPixelFormat_BGRA_4444_8u);
   }
 
+  out_data->out_flags |= PF_OutFlag_NON_PARAM_VARY;
   out_data->out_flags2 |= PF_OutFlag2_PRESERVES_FULLY_OPAQUE_PIXELS;
 
   return PF_Err_NONE;
@@ -547,19 +573,14 @@ static PF_Err Render(PF_InData* in_data, PF_OutData* out_data,
   PF_LayerDef* dst = output;
 
   // ------- frame number for temporal stability ------------------------------
-  A_long frameNumber = 0;
-  // Compute from in_data time fields (always available, no suite needed).
-  if (in_data->time_step > 0) {
-    frameNumber = static_cast<A_long>(in_data->current_time / in_data->time_step);
-  }
-  const uint32_t seed =
-      static_cast<uint32_t>(std::abs(frameNumber)) + 1;
+  const int64_t frame_clock = FrameClockFromInData(in_data);
+  const uint32_t frame_index = FrameIndexFromClock(frame_clock);
+  const uint32_t seed = frame_index + 1u;
 
   // ------- reuse NTSC processor across frames (avoid per-frame heap alloc) --
   thread_local rf2::NtscProcessor proc;
 
-  proc.encoder().set_frame_index(
-      static_cast<uint32_t>(std::abs(frameNumber)));
+  proc.encoder().set_frame_index(frame_index);
 
   // Deterministic seeds derived from frame number.
   proc.effects().controls().random_seed = seed;
