@@ -15,17 +15,82 @@ constexpr int kNtscW = 720;
 constexpr int kNtscH = 480;
 
 // ---------------------------------------------------------------------------
-// Bilinear scale: BGRA input (any size) → RGB 720×480
+// Bilinear scale: BGRA input (any size) → RGB 720×480.
+// - letterbox_to_43=true: aspect-preserve full source into 4:3 frame (bars)
+// - letterbox_to_43=false: center-crop source to fill 4:3 frame (no bars)
 // ---------------------------------------------------------------------------
+inline float PixelAspect(const PF_RationalScale& par) {
+  if (par.num <= 0 || par.den == 0) {
+    return 1.0f;
+  }
+  return static_cast<float>(par.num) / static_cast<float>(par.den);
+}
+
+inline bool IsSdRaster43Candidate(int w, int h) {
+  const bool sd_h = (h == 480 || h == 486);
+  const bool sd_w = (w == 640 || w == 704 || w == 720);
+  return sd_w && sd_h;
+}
+
 void ScaleInputToNtsc(const uint8_t* bgra, int srcW, int srcH, int rowBytes,
+                      bool letterbox_to_43,
+                      float src_display_aspect,
                       uint8_t* rgb) {
   if (srcW <= 0 || srcH <= 0) return;
 
-  const float sx = (srcW > 1) ? (srcW - 1.0f) / (kNtscW - 1.0f) : 0.0f;
-  const float sy = (srcH > 1) ? (srcH - 1.0f) / (kNtscH - 1.0f) : 0.0f;
+  std::fill(rgb, rgb + (kNtscW * kNtscH * 3), 0);
 
-  for (int y = 0; y < kNtscH; ++y) {
-    const float fy = y * sy;
+  constexpr float kTargetAspect = 4.0f / 3.0f;
+  float src_aspect = std::clamp(src_display_aspect, 0.25f, 4.0f);
+  const float src_aspect_raw = static_cast<float>(srcW) / static_cast<float>(srcH);
+  float src_par_eff = src_aspect / std::max(0.01f, src_aspect_raw);
+  src_par_eff = std::clamp(src_par_eff, 0.1f, 4.0f);
+
+  // If metadata is clearly unreliable, fall back to 4:3 for classic SD raster.
+  if (IsSdRaster43Candidate(srcW, srcH) &&
+      (src_aspect < 1.05f || src_aspect > 1.60f)) {
+    src_aspect = kTargetAspect;
+    src_par_eff = src_aspect / std::max(0.01f, src_aspect_raw);
+  }
+
+  float crop_x0 = 0.0f;
+  float crop_y0 = 0.0f;
+  float crop_w = static_cast<float>(srcW);
+  float crop_h = static_cast<float>(srcH);
+  if (!letterbox_to_43) {
+    // Fill 4:3 frame by center-cropping source display aspect.
+    if (src_aspect > kTargetAspect + 0.001f) {
+      crop_w = (crop_h * kTargetAspect) / src_par_eff;
+      crop_x0 = 0.5f * (static_cast<float>(srcW) - crop_w);
+    } else if (src_aspect < kTargetAspect - 0.001f) {
+      crop_h = (crop_w * src_par_eff) / kTargetAspect;
+      crop_y0 = 0.5f * (static_cast<float>(srcH) - crop_h);
+    }
+  }
+  const float crop_aspect =
+      (crop_w * src_par_eff) / std::max(1.0f, crop_h);
+
+  int drawW = kNtscW;
+  int drawH = kNtscH;
+  if (letterbox_to_43) {
+    if (crop_aspect > kTargetAspect) {
+      drawH = std::max(
+          1, static_cast<int>(std::lrintf(static_cast<float>(kNtscH) * (kTargetAspect / crop_aspect))));
+    } else {
+      drawW = std::max(
+          1, static_cast<int>(std::lrintf(static_cast<float>(kNtscW) * (crop_aspect / kTargetAspect))));
+    }
+  }
+  drawW = std::min(kNtscW, drawW);
+  drawH = std::min(kNtscH, drawH);
+  const int offX = (kNtscW - drawW) / 2;
+  const int offY = (kNtscH - drawH) / 2;
+
+  const float sx = (drawW > 1) ? (crop_w - 1.0f) / (drawW - 1.0f) : 0.0f;
+  const float sy = (drawH > 1) ? (crop_h - 1.0f) / (drawH - 1.0f) : 0.0f;
+
+  for (int y = 0; y < drawH; ++y) {
+    const float fy = crop_y0 + y * sy;
     const int y0 = static_cast<int>(fy);
     const int y1 = std::min(y0 + 1, srcH - 1);
     const float wy = fy - y0;
@@ -33,10 +98,10 @@ void ScaleInputToNtsc(const uint8_t* bgra, int srcW, int srcH, int rowBytes,
 
     const uint8_t* r0 = bgra + y0 * rowBytes;
     const uint8_t* r1 = bgra + y1 * rowBytes;
-    uint8_t* dst = rgb + y * kNtscW * 3;
+    uint8_t* dst = rgb + (offY + y) * kNtscW * 3 + offX * 3;
 
-    for (int x = 0; x < kNtscW; ++x) {
-      const float fx = x * sx;
+    for (int x = 0; x < drawW; ++x) {
+      const float fx = crop_x0 + x * sx;
       const int x0 = static_cast<int>(fx);
       const int x1 = std::min(x0 + 1, srcW - 1);
       const float wx = fx - x0;
@@ -162,6 +227,7 @@ void ApplyPreset(PF_ParamDef* params[], int preset) {
   SetF(params, RF2_Q_CUTOFF,        0.45f);
   SetF(params, RF2_CHROMA_MOD_SCALE,1.0f);
   SetF(params, RF2_FILTER_PASSES,   3.0f);
+  SetB(params, RF2_LETTERBOX_TO_43, true);
 
   switch (preset) {
     case RF2_PRESET_CLEAN:
@@ -339,7 +405,6 @@ static PF_Err GlobalSetup(PF_InData* in_data, PF_OutData* out_data,
                                  PrPixelFormat_BGRA_4444_8u);
   }
 
-  out_data->out_flags |= PF_OutFlag_USE_OUTPUT_EXTENT;
   out_data->out_flags2 |= PF_OutFlag2_PRESERVES_FULLY_OPAQUE_PIXELS;
 
   return PF_Err_NONE;
@@ -381,7 +446,6 @@ static PF_Err ParamsSetup(PF_InData* in_data, PF_OutData* out_data,
                "|Dirty Head VHS"
                "|Damaged Tape VHS",
                RF2_PRESET);
-
   // -- Decode controls -------------------------------------------------------
   ADD_SLIDER("Brightness",  -0.5,  0.5, -0.5,  0.5,  0.0,
              PF_Precision_HUNDREDTHS, RF2_BRIGHTNESS);
@@ -463,6 +527,7 @@ static PF_Err ParamsSetup(PF_InData* in_data, PF_OutData* out_data,
              PF_Precision_HUNDREDTHS, RF2_CHROMA_MOD_SCALE);
   ADD_SLIDER("Filter Passes",       1.0, 6.0, 1.0, 6.0, 3.0,
              PF_Precision_INTEGER, RF2_FILTER_PASSES);
+  ADD_CHECK("Letterbox to 4:3", "", TRUE, RF2_LETTERBOX_TO_43);
 
   out_data->num_params = RF2_NUM_PARAMS;
   return PF_Err_NONE;
@@ -554,8 +619,23 @@ static PF_Err Render(PF_InData* in_data, PF_OutData* out_data,
   thread_local std::vector<uint8_t> rgb_in;
   thread_local std::vector<uint8_t> rgb_out;
   rgb_in.resize(kNtscW * kNtscH * 3);  // no-op after first frame
+  const bool letterbox_to_43 = params[RF2_LETTERBOX_TO_43]->u.bd.value != 0;
+  const float in_par = PixelAspect(in_data->pixel_aspect_ratio);
+  float src_aspect =
+      (in_data->width > 0 && in_data->height > 0)
+          ? (static_cast<float>(in_data->width) * in_par /
+             static_cast<float>(in_data->height))
+          : 0.0f;
+  if (!(src_aspect > 0.25f && src_aspect < 4.0f)) {
+    const float src_par = PixelAspect(src->pix_aspect_ratio);
+    src_aspect = (src->width > 0 && src->height > 0)
+                     ? (static_cast<float>(src->width) * src_par /
+                        static_cast<float>(src->height))
+                     : (4.0f / 3.0f);
+  }
   ScaleInputToNtsc(reinterpret_cast<const uint8_t*>(src->data), src->width,
-                   src->height, src->rowbytes, rgb_in.data());
+                   src->height, src->rowbytes, letterbox_to_43, src_aspect,
+                   rgb_in.data());
 
   // ------- run NTSC encode → effects → decode pipeline ----------------------
   proc.ProcessFrame(rgb_in.data(), &rgb_out);

@@ -250,7 +250,7 @@ uint32_t XorShift32(uint32_t* state) {
 }
 
 void DrawPseudoVitcBits(float* line,
-                        int line_index,
+                        int vbi_line_id,
                         uint32_t frame_index,
                         const NtscTiming& t,
                         const NtscLevels& levels) {
@@ -287,11 +287,11 @@ void DrawPseudoVitcBits(float* line,
   }
   // Field/line identity marker bits.
   for (int i = 18; i < 22; ++i) {
-    bits[i] = static_cast<uint8_t>(((line_index + i) & 1) == 0 ? 1 : 0);
+    bits[i] = static_cast<uint8_t>(((vbi_line_id + i) & 1) == 0 ? 1 : 0);
   }
   // Remaining bits: pseudo-random with persistence so runs are common.
   uint32_t prng = static_cast<uint32_t>(0x9E3779B9u ^ frame_index * 747796405u ^
-                                        static_cast<uint32_t>(line_index * 2891336453u));
+                                        static_cast<uint32_t>(vbi_line_id * 2891336453u));
   uint8_t prev = bits[21];
   for (int i = 22; i < kCells; ++i) {
     const uint32_t r = XorShift32(&prng);
@@ -351,7 +351,7 @@ void DrawPseudoVitcBits(float* line,
 }
 
 void DrawPseudoVitsBars(float* line,
-                        int line_index,
+                        int vbi_line_id,
                         uint32_t frame_index,
                         const NtscTiming& t,
                         const NtscLevels& levels) {
@@ -369,7 +369,7 @@ void DrawPseudoVitsBars(float* line,
   }
 
   uint32_t prng = static_cast<uint32_t>(0xA511E9B3u ^ (frame_index * 2654435761u) ^
-                                        static_cast<uint32_t>((line_index + 37) * 2246822519u));
+                                        static_cast<uint32_t>((vbi_line_id + 37) * 2246822519u));
   const int bars = 8 + static_cast<int>(XorShift32(&prng) % 6u);
   uint32_t cursor = s0 + 10U + (XorShift32(&prng) % 10u);
   for (int i = 0; i < bars && cursor + 8U < s1; ++i) {
@@ -403,27 +403,31 @@ void AddPseudoVbiData(float* line,
   const auto& t = config.timing;
   const auto& levels = config.levels;
 
-  auto classify = [&](int base) -> int {
+  auto classify = [&](int base, int* vbi_id) -> int {
     const int off = line_index - base;
     // Two VITS-like bar lines directly above active picture.
     if (off == -1 || off == -2) {
+      if (vbi_id) *vbi_id = off;
       return 1;
     }
     // Three digital-looking lines slightly higher in VBI.
     if (off <= -3 && off >= -5) {
+      if (vbi_id) *vbi_id = off;
       return 2;
     }
     return 0;
   };
 
-  int kind = classify(map.top_field_start);
+  int vbi_id = 0;
+  int kind = classify(map.top_field_start, &vbi_id);
   if (kind == 0) {
-    kind = classify(map.bottom_field_start);
+    kind = classify(map.bottom_field_start, &vbi_id);
   }
   if (kind == 1) {
-    DrawPseudoVitsBars(line, line_index, frame_index, t, levels);
+    // Use a field-relative id so top/bottom fields render the same VBI pattern.
+    DrawPseudoVitsBars(line, vbi_id, frame_index, t, levels);
   } else if (kind == 2) {
-    DrawPseudoVitcBits(line, line_index, frame_index, t, levels);
+    DrawPseudoVitcBits(line, vbi_id, frame_index, t, levels);
   }
 }
 

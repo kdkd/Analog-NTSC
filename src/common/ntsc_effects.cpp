@@ -63,6 +63,9 @@ void ApplyCompositeEffectsInternal(std::vector<float>* frame_ire,
   std::uniform_real_distribution<float> uni01(0.0f, 1.0f);
   std::normal_distribution<float> gauss01(0.0f, 1.0f);
 
+  const float expected_blank_ire = config.levels.blank_ire;
+  const float expected_sync_ire = config.levels.sync_ire;
+
   // Estimate the blanking-interval (back porch) level for a scanline.
   // Used by DC restoration after multipath and by AGC pump.
   auto estimate_blank_simple = [&](const float* row) -> float {
@@ -80,15 +83,29 @@ void ApplyCompositeEffectsInternal(std::vector<float>* frame_ire,
     return n > 0 ? (sum / static_cast<float>(n)) : 0.0f;
   };
 
+  // Estimate the flat interior of the horizontal sync pulse (avoid edges).
+  auto estimate_sync_simple = [&](const float* row) -> float {
+    const uint32_t start = std::min<uint32_t>(samples_per_line, 12U);
+    const uint32_t end = std::min<uint32_t>(
+        samples_per_line, (hsync_samples > 24U) ? (hsync_samples - 12U) : hsync_samples);
+    if (start >= end) {
+      return expected_sync_ire;
+    }
+    float sum = 0.0f;
+    uint32_t n = 0;
+    for (uint32_t s = start; s < end; ++s) {
+      sum += row[s];
+      ++n;
+    }
+    return n > 0 ? (sum / static_cast<float>(n)) : expected_sync_ire;
+  };
+
   if (multipath_gain != 0.0f && multipath_delay_samples > 0) {
     std::vector<float> base = *frame_ire;
     const size_t delay = multipath_delay_samples;
-    // AGC normalization: the receiver reduces IF gain to compensate for
-    // the increased total signal power from the direct + reflected paths.
-    const float norm = 1.0f / (1.0f + std::fabs(multipath_gain));
     for (size_t i = 0; i < frame_ire->size(); ++i) {
       const float ghost = (i >= delay) ? base[i - delay] * multipath_gain : 0.0f;
-      (*frame_ire)[i] = Clamp((base[i] + ghost) * norm, -60.0f, 140.0f);
+      (*frame_ire)[i] = Clamp(base[i] + ghost, -60.0f, 140.0f);
     }
   }
 
@@ -113,7 +130,6 @@ void ApplyCompositeEffectsInternal(std::vector<float>* frame_ire,
     const float g1 = gbase * (0.9f + 0.4f * std::sin(phase * 0.71f));
     const float g2 = -0.75f * gbase * (0.9f + 0.4f * std::sin(phase * 0.49f + 1.3f));
     const float g3 = 0.52f * gbase * (0.9f + 0.4f * std::sin(phase * 0.31f + 2.1f));
-    const float ens_norm = 1.0f / (1.0f + std::fabs(g1) + std::fabs(g2) + std::fabs(g3));
     for (size_t i = 0; i < frame_ire->size(); ++i) {
       float v = base[i];
       if (i >= d1) {
@@ -125,7 +141,7 @@ void ApplyCompositeEffectsInternal(std::vector<float>* frame_ire,
       if (i >= d3) {
         v += g3 * base[i - d3];
       }
-      (*frame_ire)[i] = Clamp(v * ens_norm, -80.0f, 140.0f);
+      (*frame_ire)[i] = Clamp(v, -80.0f, 140.0f);
     }
   }
 
@@ -134,14 +150,67 @@ void ApplyCompositeEffectsInternal(std::vector<float>* frame_ire,
   // this, multipath ghosts raise the overall brightness unrealistically.
   if ((multipath_gain != 0.0f || multipath_ensemble_strength > 0.0f) &&
       lines_per_frame > 0 && samples_per_line > 0) {
+    // After DC restoration, apply a simple sync-referenced AGC. This avoids
+    // permanently compressing the entire signal just because a delayed echo
+    // was added (which makes VBI elements like VITC look too dark), while still
+    // allowing sync-overlap cases to dim/brighten via AGC like a real receiver.
+    const float expected_depth = expected_blank_ire - expected_sync_ire;
+    float depth_sum = 0.0f;
+    uint32_t depth_count = 0;
+    float min_v = 1e9f;
+    float max_v = -1e9f;
     for (uint32_t line = 0; line < lines_per_frame; ++line) {
       float* row = frame_ire->data() + static_cast<size_t>(line) * samples_per_line;
-      const float blank = estimate_blank_simple(row);
-      if (std::fabs(blank) > 0.001f) {
-        for (uint32_t s = 0; s < samples_per_line; ++s) {
-          row[s] -= blank;
-        }
+      const float blank_meas = estimate_blank_simple(row);
+      const float sync_meas = estimate_sync_simple(row);
+      // Broad vertical sync pulses can extend through the would-be back porch,
+      // making "blank" measurements meaningless. Real clamps/AGC loops are
+      // typically gated off during these intervals.
+      if ((blank_meas - sync_meas) < 15.0f) {
+        continue;
       }
+      const float blank_err = blank_meas - expected_blank_ire;
+      for (uint32_t s = 0; s < samples_per_line; ++s) {
+        row[s] -= blank_err;
+        min_v = std::min(min_v, row[s]);
+        max_v = std::max(max_v, row[s]);
+      }
+
+      const float sync_level = estimate_sync_simple(row);
+      const float depth = expected_blank_ire - sync_level;
+      if (depth > 10.0f) {
+        depth_sum += depth;
+        ++depth_count;
+      }
+    }
+
+    // Receiver AGC is typically keyed off sync amplitude, but in the presence
+    // of a delayed echo, the sync pulse can appear "deeper" simply because the
+    // echo overlaps the later portion of the sync interval. Real sync/AGC paths
+    // include limiting/clipping, so we avoid applying AGC gain-down purely
+    // because sync got deeper than nominal. We only apply gain-up when sync is
+    // weakened (e.g. cancellation).
+    float gain = 1.0f;
+    if (depth_count > 0 && expected_depth > 1.0f) {
+      float measured_depth = depth_sum / static_cast<float>(depth_count);
+      measured_depth = std::max(1.0f, std::min(measured_depth, expected_depth));
+      if (measured_depth < expected_depth * 0.98f) {
+        gain = expected_depth / measured_depth;
+      }
+    }
+    gain = Clamp(gain, 1.0f, 1.7f);
+
+    // Limit gain-up cases (weak sync) to avoid exploding highlights.
+    if (max_v > 1e-3f) {
+      gain = std::min(gain, 140.0f / max_v);
+    }
+    if (min_v < -1e-3f) {
+      gain = std::min(gain, -80.0f / min_v);
+    }
+    gain = std::max(0.25f, gain);
+
+    for (size_t i = 0; i < frame_ire->size(); ++i) {
+      (*frame_ire)[i] = Clamp((*frame_ire)[i] * gain, -80.0f, 140.0f);
     }
   }
 

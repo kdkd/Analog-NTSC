@@ -76,6 +76,7 @@ These control how the composite signal is decoded back to RGB.
 | Dot Crawl | on/off | off | When enabled, the decoder preserves the frame-to-frame phase alternation that causes the characteristic crawling dot pattern along sharp edges. |
 | Chroma Delay | -6.0 – 6.0 | 0.0 | Shifts decoded chroma left or right in pixels. Simulates the group delay mismatch between Y and C paths in real decoders. |
 | Overscan Reveal | 0.0 – 0.25 | 0.0 | Shows the normally hidden blanking and sync regions around the active picture. At 0 the output is cropped to active video only. |
+| Letterbox to 4:3 | on/off | on | Plugin input mapping mode for NTSC's 4:3 frame. On preserves source display aspect inside 4:3 (letterbox/pillarbox as needed). Off center-crops to fill 4:3 without stretching. |
 | H Lock Instability | 0.0 – 1.0 | 0.0 | Per-line horizontal position jitter from noisy sync detection. |
 | V Hold Instability | 0.0 – 1.0 | 0.0 | Frame-to-frame vertical position drift, like a misadjusted V-Hold knob. |
 | Burst Lock Instability | 0.0 – 1.0 | 0.0 | Per-line chroma phase noise from imperfect burst locking. Causes random color shifts line by line. |

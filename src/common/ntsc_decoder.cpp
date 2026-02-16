@@ -336,8 +336,8 @@ void NtscDecoder::Decode(const std::vector<float>& frame_ire,
   const float overscan_norm = overscan_reveal / 0.25f;
   const int base_visible = std::max(1, map.lines_per_field_visible);
   const int max_extra = 20;
-  const int extra_lines = static_cast<int>(std::lrintf(overscan_reveal * static_cast<float>(max_extra)));
-  const int sample_lines = base_visible + extra_lines * 2;
+  const int extra_lines =
+      static_cast<int>(std::lrintf(overscan_norm * static_cast<float>(max_extra)));
   const int active_start = static_cast<int>(t.active_start);
   const int active_samples = static_cast<int>(t.active_samples);
   const int samples_per_line_i = static_cast<int>(t.samples_per_line);
@@ -392,11 +392,26 @@ void NtscDecoder::Decode(const std::vector<float>& frame_ire,
 
   for (int y = 0; y < 480; ++y) {
     const int field_row = y / 2;
-    const float mapped_row =
-        (((static_cast<float>(field_row) + 0.5f) / static_cast<float>(base_visible)) *
-             static_cast<float>(sample_lines)) -
-        0.5f - static_cast<float>(extra_lines);
-    const int row_idx = static_cast<int>(std::lrintf(mapped_row));
+    int row_idx = 0;
+    if (extra_lines <= 0) {
+      row_idx = field_row;
+    } else {
+      // Preserve the revealed VBI lines 1:1 (no resampling) and squeeze the
+      // active picture vertically to make room. This avoids "skipping" thin
+      // VBI features like VITC when overscan reveal is high.
+      const int inner_out = std::max(1, base_visible - extra_lines * 2);
+      if (field_row < extra_lines) {
+        row_idx = field_row - extra_lines;
+      } else if (field_row >= (extra_lines + inner_out)) {
+        row_idx = base_visible + (field_row - (extra_lines + inner_out));
+      } else {
+        const float t0 =
+            (static_cast<float>(field_row - extra_lines) + 0.5f) /
+            static_cast<float>(inner_out);
+        const float mapped = t0 * static_cast<float>(base_visible) - 0.5f;
+        row_idx = static_cast<int>(std::lrintf(mapped));
+      }
+    }
     int line = (y & 1) ? (bottom_start + row_idx) : (top_start + row_idx);
     // Wrap around the frame — a real CRT keeps scanning regardless of
     // oscillator timing, so the VBI region becomes visible as a dark
