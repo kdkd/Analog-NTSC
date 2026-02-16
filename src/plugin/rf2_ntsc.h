@@ -85,6 +85,6 @@ enum {
 
 #define RF2_MAJOR_VERSION  1
 #define RF2_MINOR_VERSION  0
-#define RF2_BUG_VERSION    0
+#define RF2_BUG_VERSION    2
 #define RF2_STAGE_VERSION  PF_Stage_DEVELOP
-#define RF2_BUILD_VERSION  1
+#define RF2_BUILD_VERSION  0
